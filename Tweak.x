@@ -25,6 +25,7 @@
 #define __DISPATCH_INDIRECT__
 #define DISPATCH_MACH_SPI 1
 #import <dispatch/mach_private.h>
+#import <spawn.h>
 
 extern int *_NSGetArgc(void);
 extern const char ***_NSGetArgv(void);
@@ -50,12 +51,12 @@ static kern_return_t rocketbootstrap_look_up_with_timeout(mach_port_t bp, const 
 	}
 	// Compatibility mode for Flex, limits it to only the processes in rbs 1.0.1 and earlier
 	if (strcmp(service_name, "FLMessagingCenterSpringboard") == 0) {
-		const char **argv = *_NSGetArgv();
-		size_t arg0len = strlen(argv[0]);
+		const char **nsargv = *_NSGetArgv();
+		size_t arg0len = strlen(nsargv[0]);
 		bool allowed = false;
-		if ((arg0len > sizeof(kUserAppsPath)) && (memcmp(argv[0], kUserAppsPath, sizeof(kUserAppsPath) - 1) == 0))
+		if ((arg0len > sizeof(kUserAppsPath)) && (memcmp(nsargv[0], kUserAppsPath, sizeof(kUserAppsPath) - 1) == 0))
 			allowed = true;
-		if ((arg0len > sizeof(kSystemAppsPath)) && (memcmp(argv[0], kSystemAppsPath, sizeof(kSystemAppsPath) - 1) == 0))
+		if ((arg0len > sizeof(kSystemAppsPath)) && (memcmp(nsargv[0], kSystemAppsPath, sizeof(kSystemAppsPath) - 1) == 0))
 			allowed = true;
 		if (!allowed)
 			return 1;
@@ -403,7 +404,10 @@ static void observe_rocketd(void)
 	mach_port_t servicesPort = MACH_PORT_NULL;
 	kern_return_t err = bootstrap_look_up(bootstrap, "com.rpetrich.rocketbootstrapd", &servicesPort);
 	if (err) {
-		system("/usr/libexec/_rocketd_reenable");
+		pid_t pd;
+		posix_spawn(&pd, "/usr/libexec/_rocketd_reenable", NULL, NULL, (char **)&(const char*[]){ "_rocketd_reenable", NULL }, NULL);
+		waitpid(pd, NULL, 0);
+
 		err = bootstrap_look_up(bootstrap, "com.rpetrich.rocketbootstrapd", &servicesPort);
 	}
 	if (err) {
@@ -474,16 +478,16 @@ static void SanityCheckNotificationCallback(CFUserNotificationRef userNotificati
 	%init();
 	// Attach rockets when in the com.apple.ReportCrash.SimulateCrash job
 	// (can't check in using the launchd APIs because it hates more than one checkin; this will do)
-	const char **argv = *_NSGetArgv();
-	if (strcmp(argv[0], "/System/Library/CoreServices/ReportCrash") == 0 && argv[1]) {
-		if (strcmp(argv[1], "-f") == 0) {
+	const char **nsargv = *_NSGetArgv();
+	if (strcmp(nsargv[0], "/System/Library/CoreServices/ReportCrash") == 0 && nsargv[1]) {
+		if (strcmp(nsargv[1], "-f") == 0) {
 			isDaemon = YES;
 #ifdef DEBUG
 			NSLog(@"RocketBootstrap: Initializing ReportCrash using mach_msg_server");
 #endif
 			MSHookFunction(mach_msg_server_once, $mach_msg_server_once, (void **)&_mach_msg_server_once);
 #ifdef __clang__
-		} else if (strcmp(argv[1], "com.apple.ReportCrash.SimulateCrash") == 0) {
+		} else if (strcmp(nsargv[1], "com.apple.ReportCrash.SimulateCrash") == 0) {
 			isDaemon = YES;
 #ifdef DEBUG
 			NSLog(@"RocketBootstrap: Initializing ReportCrash using XPC");
@@ -513,7 +517,7 @@ static void SanityCheckNotificationCallback(CFUserNotificationRef userNotificati
 			}
 #endif
 		}
-	} else if (strcmp(argv[0], "/System/Library/CoreServices/SpringBoard.app/SpringBoard") == 0) {
+	} else if (strcmp(nsargv[0], "/System/Library/CoreServices/SpringBoard.app/SpringBoard") == 0) {
 #ifdef DEBUG
 		NSLog(@"RocketBootstrap: Initializing SpringBoard");
 #endif
